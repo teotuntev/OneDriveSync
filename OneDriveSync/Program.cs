@@ -117,13 +117,7 @@ try
             "This application is configured for files up to 4 MB.");
     }
 
-    string originalHash;
-
-    await using (var originalStream = File.OpenRead(filePath))
-    {
-        var hashBytes = await SHA256.HashDataAsync(originalStream);
-        originalHash = Convert.ToHexString(hashBytes);
-    }
+    var originalHash = await FileHasher.ComputeSha256Async(filePath);
 
     Console.WriteLine($"Original SHA-256: {originalHash}");
 
@@ -174,13 +168,7 @@ try
 
     Console.WriteLine("Downloaded file to local disk.");
 
-    string downloadedHash;
-
-    await using (var downloadedStream = File.OpenRead(filePath))
-    {
-        var hashBytes = await SHA256.HashDataAsync(downloadedStream);
-        downloadedHash = Convert.ToHexString(hashBytes);
-    }
+    var downloadedHash = await FileHasher.ComputeSha256Async(filePath);
 
     Console.WriteLine($"Original SHA-256:   {originalHash}");
     Console.WriteLine($"Downloaded SHA-256: {downloadedHash}");
