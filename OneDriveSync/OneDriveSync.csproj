@@ -13,5 +13,7 @@
     <PackageReference Include="Microsoft.Extensions.Configuration.UserSecrets" Version="10.0.13" />
     <PackageReference Include="Microsoft.Graph" Version="6.8.0" />
   </ItemGroup>
-
+	<ItemGroup>
+		<None Include="..\samples\test.txt" Link="samples\test.txt" CopyToOutputDirectory="PreserveNewest" />
+	</ItemGroup>
 </Project>
