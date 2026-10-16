@@ -1,9 +1,7 @@
 ﻿using Azure.Identity;
 using Microsoft.Graph;
-using Microsoft.Graph.Models;
 using Microsoft.Kiota.Abstractions;
 using Microsoft.Extensions.Configuration;
-using System.Security.Cryptography;
 
 const string folderName = "OneDriveSyncTest";
 const string fileName = "test.txt";
@@ -37,8 +35,6 @@ try
             RedirectUri = new Uri("http://localhost")
         });
 
-
-
     var client = new GraphServiceClient(credential, new[] { scope });
 
     using var authTimeout = new CancellationTokenSource(TimeSpan.FromMinutes(2));
@@ -59,48 +55,7 @@ try
     Console.WriteLine(
         $"Owner: {drive.Owner?.User?.DisplayName ?? "Unknown"}");
 
-    DriveItem? folder = null;
-
-    try
-    {
-        folder = await client.Drives[driveId]
-            .Root
-            .ItemWithPath(folderName)
-            .GetAsync();
-
-        if (folder?.Folder == null)
-        {
-            throw new InvalidOperationException(
-                $"'{folderName}' exists but is not a folder.");
-        }
-
-        Console.WriteLine($"Folder already exists: {folderName}");
-    }
-    catch (ApiException ex) when (ex.ResponseStatusCode == 404)
-    {
-        folder = await client.Drives[driveId]
-            .Items["root"]
-            .Children
-            .PostAsync(new DriveItem
-            {
-                Name = folderName,
-                Folder = new Folder(),
-                AdditionalData = new Dictionary<string, object>
-                {
-                    ["@microsoft.graph.conflictBehavior"] = "fail"
-                }
-            });
-
-        Console.WriteLine($"Folder created: {folderName}");
-    }
-
-    if (string.IsNullOrWhiteSpace(folder?.Id))
-    {
-        throw new InvalidOperationException(
-            "Could not retrieve the destination folder ID.");
-    }
-
-    var folderId = folder.Id;
+    ICloudStorage storage = new OneDriveStorage(client, driveId);
 
     if (!File.Exists(filePath))
     {
@@ -121,52 +76,18 @@ try
 
     Console.WriteLine($"Original SHA-256: {originalHash}");
 
-    DriveItem? uploaded;
-
-    await using (var stream = File.OpenRead(filePath))
-    {
-        uploaded = await client.Drives[driveId]
-            .Items[folderId]
-            .ItemWithPath(fileName)
-            .Content
-            .PutAsync(stream);
-    }
-
-    var uploadedId = uploaded?.Id;
-
-    if (string.IsNullOrWhiteSpace(uploadedId))
-    {
-        throw new InvalidOperationException(
-            "Upload did not return a file ID.");
-    }
+    var uploaded = await storage.UploadAsync(folderName, fileName, filePath);
 
     Console.WriteLine(
         $"Uploaded {fileName}, local {fileInfo.Length:N0} bytes, " +
-        $"remote {uploaded!.Size?.ToString("N0") ?? "Unknown"} bytes, " +
-        $"item ID {uploadedId}");
+        $"remote {uploaded.Size?.ToString("N0") ?? "Unknown"} bytes, " +
+        $"item ID {uploaded.Id}");
 
     File.Delete(filePath);
 
     Console.WriteLine($"Deleted local file: {filePath}");
 
-    await using (var downloadStream = await client
-        .Drives[driveId]
-        .Items[uploadedId]
-        .Content
-        .GetAsync()
-        ?? throw new InvalidOperationException(
-            "Graph returned no download stream."))
-    {
-        await using var outputStream = new FileStream(
-            filePath,
-            FileMode.Create,
-            FileAccess.Write,
-            FileShare.None);
-
-        await downloadStream.CopyToAsync(outputStream);
-    }
-
-    Console.WriteLine("Downloaded file to local disk.");
+    await storage.DownloadAsync(uploaded.Id, filePath);
 
     var downloadedHash = await FileHasher.ComputeSha256Async(filePath);
 
