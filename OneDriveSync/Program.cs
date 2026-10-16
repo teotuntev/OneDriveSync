@@ -2,17 +2,18 @@
 using Azure.Identity;
 using Microsoft.Graph;
 using Microsoft.Graph.Models;
-using Microsoft.Graph.Models.ODataErrors;
 using Microsoft.Kiota.Abstractions;
 using Microsoft.Extensions.Configuration;
+using System.Security.Cryptography;
 
 const string folderName = "OneDriveSyncTest";
 const string fileName = "test.txt";
+const long maxSimpleUploadBytes = 4L * 1024 * 1024;
 
 var filePath = Path.Combine(
     AppContext.BaseDirectory,
     "samples",
-    "test.txt");
+    fileName);
 
 var configuration = new ConfigurationBuilder()
     .AddUserSecrets<Program>()
@@ -93,6 +94,8 @@ if (string.IsNullOrWhiteSpace(folder?.Id))
         "Could not retrieve the destination folder ID.");
 }
 
+var folderId = folder.Id;
+
 if (!File.Exists(filePath))
 {
     throw new FileNotFoundException(
@@ -101,32 +104,92 @@ if (!File.Exists(filePath))
 
 var fileInfo = new FileInfo(filePath);
 
-const long maxSimpleUploadBytes = 4 * 1024 * 1024;
-
 if (fileInfo.Length > maxSimpleUploadBytes)
 {
     throw new InvalidOperationException(
-        $"File is {fileInfo.Length:N0} bytes. Simple upload supports up to 4 MB.");
+        $"File is {fileInfo.Length:N0} bytes. " +
+        "This application is configured for files up to 4 MB.");
 }
+
+string originalHash;
+
+await using (var originalStream = File.OpenRead(filePath))
+{
+    var hashBytes = await SHA256.HashDataAsync(originalStream);
+    originalHash = Convert.ToHexString(hashBytes);
+}
+
+Console.WriteLine($"Original SHA-256: {originalHash}");
 
 DriveItem? uploaded;
 
 await using (var stream = File.OpenRead(filePath))
 {
     uploaded = await client.Drives[driveId]
-        .Items[folder.Id]
+        .Items[folderId]
         .ItemWithPath(fileName)
         .Content
         .PutAsync(stream);
 }
 
-if (string.IsNullOrWhiteSpace(uploaded?.Id))
+var uploadedId = uploaded?.Id;
+
+if (string.IsNullOrWhiteSpace(uploadedId))
 {
-    throw new InvalidOperationException("Upload did not return an item.");
+    throw new InvalidOperationException(
+        "Upload did not return a file ID.");
 }
 
 Console.WriteLine(
     $"Uploaded {fileName}, local {fileInfo.Length:N0} bytes, " +
-    $"remote {uploaded.Size:N0} bytes, item ID {uploaded.Id}");
+    $"remote {uploaded!.Size?.ToString("N0") ?? "Unknown"} bytes, " +
+    $"item ID {uploadedId}");
+
+File.Delete(filePath);
+
+Console.WriteLine($"Deleted local file: {filePath}");
+
+await using (var downloadStream = await client
+    .Drives[driveId]
+    .Items[uploadedId]
+    .Content
+    .GetAsync()
+    ?? throw new InvalidOperationException(
+        "Graph returned no download stream."))
+{
+    await using var outputStream = new FileStream(
+        filePath,
+        FileMode.Create,
+        FileAccess.Write,
+        FileShare.None);
+
+    await downloadStream.CopyToAsync(outputStream);
+}
+
+Console.WriteLine("Downloaded file to local disk.");
+
+string downloadedHash;
+
+await using (var downloadedStream = File.OpenRead(filePath))
+{
+    var hashBytes = await SHA256.HashDataAsync(downloadedStream);
+    downloadedHash = Convert.ToHexString(hashBytes);
+}
+
+Console.WriteLine($"Original SHA-256:   {originalHash}");
+Console.WriteLine($"Downloaded SHA-256: {downloadedHash}");
+
+if (string.Equals(
+    originalHash,
+    downloadedHash,
+    StringComparison.Ordinal))
+{
+    Console.WriteLine("MATCH: File contents are identical.");
+}
+else
+{
+    Console.WriteLine("MISMATCH: File contents differ.");
+    Environment.ExitCode = 1;
+}
 
 public partial class Program { }
