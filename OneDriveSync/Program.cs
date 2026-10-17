@@ -72,32 +72,18 @@ try
             "This application is configured for files up to 4 MB.");
     }
 
-    var originalHash = await FileHasher.ComputeSha256Async(filePath);
-
-    Console.WriteLine($"Original SHA-256: {originalHash}");
-
-    var uploaded = await storage.UploadAsync(folderName, fileName, filePath);
+    var verifier = new RoundTripVerifier(storage);
+    var result = await verifier.RunAsync(folderName, filePath);
 
     Console.WriteLine(
-        $"Uploaded {fileName}, local {fileInfo.Length:N0} bytes, " +
-        $"remote {uploaded.Size?.ToString("N0") ?? "Unknown"} bytes, " +
-        $"item ID {uploaded.Id}");
+        $"Uploaded {result.Remote.Name}, local {fileInfo.Length:N0} bytes, " +
+        $"remote {result.Remote.Size?.ToString("N0") ?? "Unknown"} bytes, " +
+        $"item ID {result.Remote.Id}");
 
-    File.Delete(filePath);
+    Console.WriteLine($"Original SHA-256:   {result.OriginalHash}");
+    Console.WriteLine($"Downloaded SHA-256: {result.DownloadedHash}");
 
-    Console.WriteLine($"Deleted local file: {filePath}");
-
-    await storage.DownloadAsync(uploaded.Id, filePath);
-
-    var downloadedHash = await FileHasher.ComputeSha256Async(filePath);
-
-    Console.WriteLine($"Original SHA-256:   {originalHash}");
-    Console.WriteLine($"Downloaded SHA-256: {downloadedHash}");
-
-    if (string.Equals(
-        originalHash,
-        downloadedHash,
-        StringComparison.Ordinal))
+    if (result.IsMatch)
     {
         Console.WriteLine("MATCH: File contents are identical.");
     }
