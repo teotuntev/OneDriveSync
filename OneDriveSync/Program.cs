@@ -5,7 +5,6 @@ using Microsoft.Extensions.Configuration;
 
 const string folderName = "OneDriveSyncTest";
 const string fileName = "test.txt";
-const long maxSimpleUploadBytes = 4L * 1024 * 1024;
 const string scope = "Files.ReadWrite";
 
 try
@@ -64,13 +63,6 @@ try
     }
 
     var fileInfo = new FileInfo(filePath);
-
-    if (fileInfo.Length > maxSimpleUploadBytes)
-    {
-        throw new InvalidOperationException(
-            $"File is {fileInfo.Length:N0} bytes. " +
-            "This application is configured for files up to 4 MB.");
-    }
 
     var verifier = new RoundTripVerifier(storage);
     var result = await verifier.RunAsync(folderName, filePath);
