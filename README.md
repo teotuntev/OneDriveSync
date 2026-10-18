@@ -83,16 +83,23 @@ The OneDrive code itself is not unit tested because that would need a live conne
 ## Why I did it this way
 
 I put the cloud part behind a small interface (ICloudStorage with upload and download). OneDriveStorage implements it and RoundTripVerifier only knows the interface. That keeps the verification logic separate from Graph, lets me test it with a fake, and means another provider could be added without touching the verifier.
-The local copy is deleted before the download on purpose. If it stayed, the download would overwrite an identical file and the hash comparison would prove nothing. The delete only happens after the upload succeeded, so a failed upload never costs you the original.
+
+The local copy is deleted before the download on purpose. If OneDrive changed the content, the hashes would differ either way, so the delete is not what catches corruption. What it protects against is a false MATCH: if the original stayed in place, a download that silently failed to write, or wrote to the wrong place, would still end in a match. Deleting the file first means the check can only pass if the download really recreated it. The delete only happens after the upload succeeded, so a failed upload never costs you the original.
+
 I used the Graph SDK with Azure.Identity instead of raw HTTP to keep the code focused on the verification. Underneath it is the usual Graph calls: get item by path, PUT to content, createUploadSession, and GET content.
+
 Files up to 4 MB are uploaded with a single PUT. Anything bigger goes through an upload session in 1.25 MiB slices (Graph needs a multiple of 320 KiB) and prints progress. Both paths replace an existing file with the same name.
+
 The download is written to a temporary file ending in .download and only moved into place once it finishes, so a dropped connection can't leave a half written file at the real path.
+
 Sign-in is interactive on every run and has a 2 minute timeout. I left out a token cache on purpose so that cancelling the sign-in or running without internet is easy to reproduce. Without the timeout, closing the browser tab leaves the app waiting forever.
 
 ## Things that went wrong along the way
 
 Closing the sign-in tab made the app hang with no error. I fixed it with a timeout and a handler for the cancellation.
+
 When I first added the timeout as a separate token request, the sign-in prompt showed up twice because the scope string differed from the one the Graph client used. I fixed it by putting the timeout on the first Graph call instead.
+
 During a 15 MB test the connection dropped in the middle of the download. The old code wrote straight to the real file, so a truncated file was left behind, and the next run treated it as the original and uploaded it. That is why the download now goes through a temporary file.
 
 ## Known limitations
